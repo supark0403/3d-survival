@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>3D SURVIVAL — Vampire Survivors tribute</title>
+<style>
+  :root{
+    --hp:#e5484d; --xp:#4cc9f0; --gold:#ffd166;
+    --panel:rgba(10,10,20,.82); --edge:rgba(255,255,255,.14);
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{width:100%;height:100%;overflow:hidden;background:#05060a;font-family:'Segoe UI',system-ui,sans-serif;color:#e8e8f0;user-select:none;-webkit-user-select:none}
+  #c{display:block;width:100%;height:100%}
+
+  /* ---------- HUD ---------- */
+  #hud{position:fixed;inset:0;pointer-events:none;display:none;z-index:5}
+  #xpbar-wrap{position:absolute;top:0;left:0;right:0;height:14px;background:rgba(0,0,0,.55);border-bottom:1px solid var(--edge)}
+  #xpbar{height:100%;width:0%;background:linear-gradient(90deg,#2a6f97,var(--xp));box-shadow:0 0 12px rgba(76,201,240,.7);transition:width .15s}
+  #lvl{position:absolute;top:20px;left:14px;font-size:15px;font-weight:700;color:var(--xp);text-shadow:0 0 8px rgba(76,201,240,.8)}
+  #hpwrap{position:absolute;top:44px;left:14px;width:280px}
+  #hpbar-bg{height:18px;background:rgba(0,0,0,.55);border:1px solid var(--edge);border-radius:9px;overflow:hidden}
+  #hpbar{height:100%;width:100%;background:linear-gradient(90deg,#7a1c20,var(--hp));transition:width .12s}
+  #hptext{position:absolute;top:2px;left:10px;font-size:12px;font-weight:700;text-shadow:0 1px 2px #000}
+  #timer{position:absolute;top:20px;right:16px;font-size:26px;font-weight:800;letter-spacing:1px;text-shadow:0 0 10px rgba(255,209,102,.5)}
+  #kills{position:absolute;top:52px;right:16px;font-size:14px;color:#c9c9d8}
+  #weapons{position:absolute;left:14px;bottom:14px;display:flex;gap:8px;flex-wrap:wrap}
+  .wbadge{background:var(--panel);border:1px solid var(--edge);border-radius:8px;padding:5px 10px;font-size:13px;font-weight:600}
+  .wbadge b{color:var(--gold)}
+  #hint{position:absolute;bottom:14px;left:50%;transform:translateX(-50%);font-size:13px;color:#9aa;opacity:.9;transition:opacity 1s}
+
+  /* ---------- overlays ---------- */
+  .overlay{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:rgba(4,5,10,.78);backdrop-filter:blur(3px);z-index:10;text-align:center}
+  .hidden{display:none!important}
+  h1.title{font-size:64px;font-weight:900;letter-spacing:6px;background:linear-gradient(180deg,#fff,#c9a2ff 55%,#7b2cbf);-webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 0 18px rgba(155,89,255,.45))}
+  .subtitle{margin-top:6px;font-size:15px;color:#aab;letter-spacing:2px}
+  .controls{margin:28px 0 30px;display:grid;grid-template-columns:auto auto;gap:7px 18px;font-size:14px;color:#cdd;text-align:left}
+  .controls b{color:#fff;background:rgba(255,255,255,.09);border:1px solid var(--edge);border-radius:6px;padding:2px 9px;font-family:monospace;font-size:13px;white-space:nowrap}
+  .bigbtn{pointer-events:auto;cursor:pointer;font-size:20px;font-weight:800;letter-spacing:2px;color:#fff;background:linear-gradient(180deg,#7b2cbf,#4a1d7a);border:1px solid #9d5cff;border-radius:12px;padding:16px 54px;box-shadow:0 0 24px rgba(139,79,255,.5);transition:transform .1s}
+  .bigbtn:hover{transform:scale(1.05)}
+  .credits{position:absolute;bottom:16px;font-size:12px;color:#667}
+
+  /* level up */
+  #lu-title{font-size:34px;font-weight:900;color:var(--gold);text-shadow:0 0 18px rgba(255,209,102,.6);letter-spacing:3px;margin-bottom:6px}
+  #lu-sub{color:#aab;font-size:14px;margin-bottom:26px}
+  #lu-cards{display:flex;gap:18px}
+  .card{pointer-events:auto;cursor:pointer;width:230px;background:var(--panel);border:1px solid var(--edge);border-radius:14px;padding:22px 18px;transition:transform .12s,border-color .12s,box-shadow .12s}
+  .card:hover{transform:translateY(-6px) scale(1.03);border-color:#9d5cff;box-shadow:0 8px 30px rgba(139,79,255,.35)}
+  .card .ico{font-size:40px;margin-bottom:10px}
+  .card .nm{font-size:17px;font-weight:800;color:#fff;margin-bottom:6px}
+  .card .ds{font-size:12.5px;color:#b9c2d0;line-height:1.45;min-height:54px}
+  .card .key{margin-top:12px;font-family:monospace;font-size:12px;color:#889;background:rgba(255,255,255,.07);border-radius:6px;padding:3px 0;display:inline-block;min-width:26px}
+  .card.new{border-color:rgba(255,209,102,.5)}
+  .card .tag{display:inline-block;font-size:10px;font-weight:800;letter-spacing:1px;color:#3a2b00;background:var(--gold);border-radius:4px;padding:1px 6px;margin-bottom:8px}
+
+  /* game over */
+  #go-title{font-size:70px;font-weight:900;color:var(--hp);text-shadow:0 0 30px rgba(229,72,77,.6);letter-spacing:4px}
+  .stats{margin:26px 0 30px;display:flex;gap:34px}
+  .stat{min-width:110px}
+  .stat .v{font-size:34px;font-weight:800;color:#fff}
+  .stat .k{font-size:12px;color:#99a;letter-spacing:2px;margin-top:2px}
+
+  #flash{position:fixed;inset:0;pointer-events:none;z-index:6;background:radial-gradient(ellipse at center,transparent 45%,rgba(229,72,77,.55) 100%);opacity:0;transition:opacity .25s}
+  #err{position:fixed;left:8px;bottom:8px;z-index:50;font-family:monospace;font-size:11px;color:#f88;background:rgba(40,0,0,.8);padding:6px 10px;border-radius:6px;display:none;max-width:70vw}
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+}}
+</script>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div id="hud">
+  <div id="xpbar-wrap"><div id="xpbar"></div></div>
+  <div id="lvl">LV 1</div>
+  <div id="hpwrap"><div id="hpbar-bg"><div id="hpbar"></div><span id="hptext">100 / 100</span></div></div>
+  <div id="timer">0:00</div>
+  <div id="kills">☠ 0</div>
+  <div id="weapons"></div>
+  <div id="hint">WASD 이동 · 마우스 시점 · SPACE 점프 · ESC 일시정지</div>
+</div>
+
+<div id="flash"></div>
+<div id="err"></div>
+
+<!-- start menu -->
+<div id="menu" class="overlay">
+  <h1 class="title">3D SURVIVAL</h1>
+  <div class="subtitle">— a vampire survivors tribute —</div>
+  <div class="controls">
+    <b>W A S D</b><span>이동</span>
+    <b>Mouse</b><span>시점 회전 (클릭해서 잠금)</span>
+    <b>SPACE</b><span>점프</span>
+    <b>ESC</b><span>일시정지</span>
+  </div>
+  <div class="bigbtn" id="startbtn">▶ &nbsp;CLICK TO PLAY</div>
+  <div class="credits">3D models &amp; SFX: Kenney.nl (CC0) · three.js</div>
+</div>
+
+<!-- level up -->
+<div id="levelup" class="overlay hidden">
+  <div id="lu-title">LEVEL UP!</div>
+  <div id="lu-sub">강화 하나를 선택하세요</div>
+  <div id="lu-cards"></div>
+</div>
+
+<!-- pause -->
+<div id="pause" class="overlay hidden">
+  <h1 class="title" style="font-size:44px">PAUSED</h1>
+  <div class="subtitle" style="margin-top:18px">클릭해서 계속하기</div>
+</div>
+
+<!-- game over -->
+<div id="gameover" class="overlay hidden">
+  <div id="go-title">YOU DIED</div>
+  <div class="stats">
+    <div class="stat"><div class="v" id="go-time">0:00</div><div class="k">SURVIVED</div></div>
+    <div class="stat"><div class="v" id="go-lvl">1</div><div class="k">LEVEL</div></div>
+    <div class="stat"><div class="v" id="go-kills">0</div><div class="k">KILLS</div></div>
+  </div>
+  <div class="bigbtn" id="restartbtn">↻ &nbsp;RESTART (R)</div>
+</div>
+
+<script type="module" src="main.js"></script>
+</body>
+</html>
