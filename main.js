@@ -228,10 +228,10 @@ let yaw=0, pitch=0.42;
 const canvas=$('c');
 function resumeGame(){
   if(state!=='pause') return;
-  state='playing'; pauseEl.classList.add('hidden'); try{canvas.requestPointerLock().catch(()=>{})}catch(e){};
+  state='playing'; pauseEl.classList.add('hidden'); tryLockPointer();
 }
 canvas.addEventListener('click', ()=>{
-  if(state==='playing'){ if(document.pointerLockElement!==canvas) try{canvas.requestPointerLock().catch(()=>{})}catch(e){}; }
+  if(state==='playing'){ if(document.pointerLockElement!==canvas) tryLockPointer(); }
   else resumeGame();
 });
 pauseEl.addEventListener('click', resumeGame);
@@ -239,7 +239,8 @@ document.addEventListener('pointerlockchange', ()=>{
   if(document.pointerLockElement===canvas){
     if(state==='pause'){ state='playing'; pauseEl.classList.add('hidden'); }
   } else {
-    if(state==='playing' && !luOpen){ state='pause'; pauseEl.classList.remove('hidden'); }
+    // in mobile mode we never take pointer lock, so losing it must NOT auto-pause
+    if(!Settings.mobile && state==='playing' && !luOpen){ state='pause'; pauseEl.classList.remove('hidden'); }
   }
 });
 document.addEventListener('mousemove', e=>{
@@ -250,6 +251,63 @@ document.addEventListener('mousemove', e=>{
   }
 });
 
+/* ---------------- pointer-lock helper (skipped in mobile/touch mode) ---------------- */
+function tryLockPointer(){ if(Settings.mobile) return; try{canvas.requestPointerLock().catch(()=>{})}catch(e){} }
+
+/* ---------------- mobile touch controls (virtual joystick + look zone + jump) ---------------- */
+const touch = { jx:0, jy:0 };            // joystick vector, -1..1
+let joyTouchId=null, lookTouchId=null, lookLast={x:0,y:0}, jumpHeld=false;
+const stickbase=$('stickbase'), stickknob=$('stickknob'), lookzone=$('lookzone');
+const STICK_R=53;                        // knob travel radius (px)
+
+function moveJoy(t){
+  const r=stickbase.getBoundingClientRect();
+  const cx=r.left+r.width/2, cy=r.top+r.height/2;
+  let dx=t.clientX-cx, dy=t.clientY-cy;
+  const d=Math.hypot(dx,dy);
+  if(d>STICK_R){ dx=dx/d*STICK_R; dy=dy/d*STICK_R; }
+  stickknob.style.transform=`translate(${dx}px,${dy}px)`;
+  touch.jx=dx/STICK_R; touch.jy=dy/STICK_R;
+}
+stickbase.addEventListener('touchstart', e=>{ e.preventDefault(); const t=e.changedTouches[0]; joyTouchId=t.identifier; moveJoy(t); },{passive:false});
+stickbase.addEventListener('touchmove',  e=>{ e.preventDefault(); for(const t of e.changedTouches) if(t.identifier===joyTouchId) moveJoy(t); },{passive:false});
+function endJoy(e){ for(const t of e.changedTouches) if(t.identifier===joyTouchId){ joyTouchId=null; touch.jx=0;touch.jy=0; stickknob.style.transform='translate(0,0)'; } }
+stickbase.addEventListener('touchend', endJoy); stickbase.addEventListener('touchcancel', endJoy);
+
+// right-side look zone — drag to rotate the camera (replaces mouse-look)
+lookzone.addEventListener('touchstart', e=>{ e.preventDefault(); const t=e.changedTouches[0]; lookTouchId=t.identifier; lookLast.x=t.clientX; lookLast.y=t.clientY; },{passive:false});
+lookzone.addEventListener('touchmove',  e=>{
+  e.preventDefault(); if(state!=='playing') return;
+  for(const t of e.changedTouches){
+    if(t.identifier!==lookTouchId) continue;
+    const dx=t.clientX-lookLast.x, dy=t.clientY-lookLast.y; lookLast.x=t.clientX; lookLast.y=t.clientY;
+    yaw   -= dx*0.005*Settings.sens;
+    pitch += dy*0.004*Settings.sens;
+    pitch = Math.max(0.12, Math.min(1.25, pitch));
+  }
+},{passive:false});
+function endLook(e){ for(const t of e.changedTouches) if(t.identifier===lookTouchId) lookTouchId=null; }
+lookzone.addEventListener('touchend', endLook); lookzone.addEventListener('touchcancel', endLook);
+
+// jump button
+$('jumpbtn').addEventListener('touchstart', e=>{ e.preventDefault(); jumpHeld=true; },{passive:false});
+function endJump(e){ e.preventDefault(); jumpHeld=false; }
+$('jumpbtn').addEventListener('touchend', endJump); $('jumpbtn').addEventListener('touchcancel', endJump);
+
+// mobile pause button (top-center) — toggles pause without pointer lock
+$('pausebtn-m').addEventListener('touchstart', e=>{
+  e.preventDefault();
+  if(state==='playing'){ state='pause'; pauseEl.classList.remove('hidden'); }
+});
+
+// show/hide the touch layer only when mobile mode is on and we're actively playing
+let _touchShown=null;
+function syncTouchUI(){
+  const on = Settings.mobile && state==='playing';
+  if(on===_touchShown) return;
+  _touchShown=on; $('touchui').style.display = on?'block':'none';
+}
+
 /* ---------------- settings UI wiring (mouse sensitivity + volume) ---------------- */
 {
   const sensS=$('sens-slider'), volS=$('vol-slider');
@@ -257,6 +315,7 @@ document.addEventListener('mousemove', e=>{
   volS.addEventListener('input', ()=>{ Settings.vol=parseInt(volS.value,10)/100; $('vol-val').textContent=Math.round(Settings.vol*100)+'%'; if(AudioSys.master) AudioSys.master.gain.value=Settings.vol; });
   $('sens-reset').addEventListener('click', ()=>{ sensS.value=1; sensS.dispatchEvent(new Event('input')); });
   $('vol-reset').addEventListener('click', ()=>{ volS.value=90; volS.dispatchEvent(new Event('input')); });
+  $('touch-check').addEventListener('change', e=>{ Settings.mobile=e.target.checked; syncTouchUI(); });
   $('settings-close').addEventListener('click', closeSettings);
   // stop clicks inside the settings panel from falling through to the pause "resume" handler
   $('settings').addEventListener('click', e=>e.stopPropagation());
@@ -265,14 +324,14 @@ document.addEventListener('mousemove', e=>{
 /* ---------------- game state ---------------- */
 let state='menu';           // menu | playing | levelup | pause | over
 let luOpen=false;
-/* ---------------- settings (mouse sensitivity + volume) ---------------- */
-const Settings = { sens:1, vol:0.9 };
-try{ const s=JSON.parse(localStorage.getItem('ds3_settings')||'{}'); if(typeof s.sens==='number') Settings.sens=s.sens; if(typeof s.vol==='number') Settings.vol=s.vol; }catch(e){}
+/* ---------------- settings (mouse sensitivity + volume + mobile) ---------------- */
+const Settings = { sens:1, vol:0.9, mobile:false };
+try{ const s=JSON.parse(localStorage.getItem('ds3_settings')||'{}'); if(typeof s.sens==='number') Settings.sens=s.sens; if(typeof s.vol==='number') Settings.vol=s.vol; if(typeof s.mobile==='boolean') Settings.mobile=s.mobile; }catch(e){}
 let settingsOpen=false;
-function openSettings(){ settingsOpen=true; $('settings').classList.remove('hidden'); $('sens-slider').value=Settings.sens; $('vol-slider').value=Math.round(Settings.vol*100); $('sens-val').textContent=Settings.sens.toFixed(2)+'x'; $('vol-val').textContent=Math.round(Settings.vol*100)+'%'; }
-function closeSettings(){ settingsOpen=false; $('settings').classList.add('hidden'); try{localStorage.setItem('ds3_settings',JSON.stringify({sens:Settings.sens,vol:Settings.vol}));}catch(e){}
-  // if we opened settings from pause, resume play and re-lock the pointer
-  if(state==='pause'){ state='playing'; pauseEl.classList.add('hidden'); try{canvas.requestPointerLock().catch(()=>{})}catch(e){} } }
+function openSettings(){ settingsOpen=true; $('settings').classList.remove('hidden'); $('sens-slider').value=Settings.sens; $('vol-slider').value=Math.round(Settings.vol*100); $('sens-val').textContent=Settings.sens.toFixed(2)+'x'; $('vol-val').textContent=Math.round(Settings.vol*100)+'%'; $('touch-check').checked=!!Settings.mobile; }
+function closeSettings(){ settingsOpen=false; $('settings').classList.add('hidden'); try{localStorage.setItem('ds3_settings',JSON.stringify({sens:Settings.sens,vol:Settings.vol,mobile:Settings.mobile}));}catch(e){}
+  // if we opened settings from pause, resume play and re-lock the pointer (mouse mode only)
+  if(state==='pause'){ state='playing'; pauseEl.classList.add('hidden'); tryLockPointer(); } }
 window._dbg = ()=>({state, luOpen, pendingLus, hp:P.hp, maxHp:P.maxHp, lvl:P.level, xp:P.xp,
   gameTime, kills, enemiesAlive:enemies.filter(e=>e.alive).length,
   pauseVisible:!pauseEl.classList.contains('hidden'), luVisible:!luEl.classList.contains('hidden')});
@@ -585,7 +644,7 @@ function pickUpgrade(i){
   pendingLus--;
   if(pendingLus>0){ openLevelUp(); return; }
   state='playing';
-  try{canvas.requestPointerLock().catch(()=>{})}catch(e){};
+  tryLockPointer();
 }
 
 /* ---------------- weapon fx refresh / badges ---------------- */
@@ -635,7 +694,7 @@ async function startGame(){
   state='playing';
   menuEl.classList.add('hidden'); goEl.classList.add('hidden'); pauseEl.classList.add('hidden');
   hud.style.display='block';
-  try{canvas.requestPointerLock().catch(()=>{})}catch(e){};
+  tryLockPointer();
 }
 
 /* ---------------- main loop ---------------- */
@@ -654,6 +713,7 @@ renderer.setAnimationLoop(()=>{
     if(window._lanternLights) for(const L of window._lanternLights){ L.ph+=dt*7; L.l.intensity=L.base*(0.8+0.2*Math.sin(L.ph)+0.1*Math.sin(L.ph*3.7)); }
   }
   renderFx(dt);
+  syncTouchUI();
   renderer.render(scene,camera);
 });
 
@@ -661,8 +721,8 @@ function update(dt){
   gameTime+=dt; hintT-=dt;
   if(hintT<0) hintEl.style.opacity=0;
 
-  /* --- player movement --- */
-  let ix=(keys.KeyD?1:0)-(keys.KeyA?1:0), iz=(keys.KeyW?1:0)-(keys.KeyS?1:0);
+  /* --- player movement (keyboard + virtual joystick) --- */
+  let ix=(keys.KeyD?1:0)-(keys.KeyA?1:0)+touch.jx, iz=(keys.KeyW?1:0)-(keys.KeyS?1:0)-touch.jy;
   const il=Math.hypot(ix,iz); if(il>0){ix/=il;iz/=il;}
   // camera-relative movement: forward=(sin yaw, cos yaw), right=(-cos yaw, sin yaw)
   const cy=Math.cos(yaw), sy=Math.sin(yaw);
@@ -672,8 +732,8 @@ function update(dt){
   const rr=Math.hypot(P.pos.x,P.pos.z);
   if(rr>WORLD_R-2){ P.pos.x*=(WORLD_R-2)/rr; P.pos.z*=(WORLD_R-2)/rr; }
 
-  // jump / gravity
-  if(keys.Space && P.onGround){ P.velY=9.5*(1+0.25*statLvl.jump); P.onGround=false; AudioSys.play('ui',0.2,1.6); }
+  // jump / gravity (keyboard Space or mobile jump button)
+  if((keys.Space||jumpHeld) && P.onGround){ P.velY=9.5*(1+0.25*statLvl.jump); P.onGround=false; AudioSys.play('ui',0.2,1.6); }
   if(!P.onGround){ P.velY-=24*dt; P.pos.y+=P.velY*dt; if(P.pos.y<=0){P.pos.y=0;P.velY=0;P.onGround=true;} }
 
   // face movement
@@ -1009,7 +1069,7 @@ function restart(){
   goEl.classList.add('hidden');
   resetGame(); buildPlayer();
   state='playing'; hud.style.display='block';
-  try{canvas.requestPointerLock().catch(()=>{})}catch(e){};
+  tryLockPointer();
 }
 
 /* ---------------- boot ---------------- */

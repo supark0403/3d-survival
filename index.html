@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>3D SURVIVAL — Vampire Survivors tribute</title>
 <style>
   :root{
@@ -78,6 +78,18 @@
   input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:20px;height:20px;border-radius:50%;background:#fff;border:3px solid #9d5cff;cursor:pointer;box-shadow:0 0 10px rgba(157,92,255,.8)}
   input[type=range]::-moz-range-thumb{width:18px;height:18px;border-radius:50%;background:#fff;border:3px solid #9d5cff;cursor:pointer}
   .set-actions{display:flex;gap:12px;margin-top:6px}
+  .set-row label.chk{display:flex;align-items:center;gap:10px;font-size:15px;font-weight:700;color:#dfe;cursor:pointer}
+  .set-row input[type=checkbox]{width:24px;height:24px;accent-color:#9d5cff;cursor:pointer}
+
+  /* ---------- touch controls (mobile play) ---------- */
+  body{touch-action:none;-webkit-tap-highlight-color:transparent}
+  #touchui{position:fixed;inset:0;pointer-events:none;z-index:8;display:none}
+  .stick-base{position:absolute;left:26px;bottom:34px;width:132px;height:132px;border-radius:50%;background:rgba(255,255,255,.07);border:2px solid rgba(255,255,255,.28);pointer-events:auto;touch-action:none}
+  .stick-knob{position:absolute;left:50%;top:50%;width:58px;height:58px;margin:-29px 0 0 -29px;border-radius:50%;background:rgba(157,92,255,.55);border:2px solid #c9a2ff;box-shadow:0 0 14px rgba(157,92,255,.6)}
+  #lookzone{position:absolute;right:0;top:0;width:55%;height:100%;pointer-events:auto;touch-action:none}
+  #jumpbtn{position:absolute;right:30px;bottom:64px;width:84px;height:84px;border-radius:50%;background:rgba(255,209,102,.22);border:2px solid rgba(255,209,102,.7);color:#ffd166;font-size:13px;font-weight:800;letter-spacing:1px;display:flex;align-items:center;justify-content:center;pointer-events:auto;touch-action:none}
+  #jumpbtn:active{background:rgba(255,209,102,.4)}
+  #pausebtn-m{position:absolute;top:22px;left:50%;transform:translateX(-50%);width:46px;height:46px;border-radius:10px;background:var(--panel);border:1px solid var(--edge);color:#fff;font-size:20px;display:flex;align-items:center;justify-content:center;pointer-events:auto;touch-action:none}
 </style>
 <script type="importmap">
 { "imports": {
@@ -101,6 +113,14 @@
 
 <div id="flash"></div>
 <div id="err"></div>
+
+<!-- touch controls (shown when "휴대폰 플레이" is on) -->
+<div id="touchui">
+  <div class="stick-base" id="stickbase"><div class="stick-knob" id="stickknob"></div></div>
+  <div id="lookzone"></div>
+  <div id="jumpbtn">점프</div>
+  <div id="pausebtn-m">❚❚</div>
+</div>
 
 <!-- start menu -->
 <div id="menu" class="overlay">
@@ -147,6 +167,9 @@
     <div class="set-row">
       <label>🔊 소리 크기 <span id="vol-val">90%</span></label>
       <input type="range" id="vol-slider" min="0" max="100" step="5" value="90">
+    </div>
+    <div class="set-row">
+      <label class="chk"><input type="checkbox" id="touch-check"> 📱 휴대폰 플레이 (터치 조이스틱)</label>
     </div>
     <div class="set-actions">
       <div class="ghostbtn" id="sens-reset" style="flex:1;text-align:center">감도 초기화</div>
