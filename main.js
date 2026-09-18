@@ -5,6 +5,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
 /* ---------------- error surface ---------------- */
 const errEl = document.getElementById('err');
@@ -283,7 +284,7 @@ const P = { pos:new THREE.Vector3(0,0,0), velY:0, onGround:true, hp:100, maxHp:1
 let playerG=null, playerBlob=null, playerRing=null;
 function buildPlayer(){
   if(playerG){ scene.remove(playerG); playerG=null; }
-  const g = M.player ? M.player.clone(true) : fallbackMesh('player');
+  const g = M.player ? SkeletonUtils.clone(M.player) : fallbackMesh('player');
   g.scale.setScalar(1.25);
   // make the hero clearly readable: warm gold emissive tint + keep shadows
   g.traverse(o=>{ if(o.isMesh){ o.castShadow=true;
@@ -707,10 +708,10 @@ function update(dt){
     }
   }
 
-  /* --- camera --- */
+  /* --- camera (direct follow: no lerp, so mouse view turns are crisp with zero swing/acceleration) --- */
   const camDist=9, cp=Math.cos(pitch), sp=Math.sin(pitch);
   const cx=P.pos.x - Math.sin(yaw)*cp*camDist, cyy=P.pos.y+1.6+sp*camDist, cz=P.pos.z - Math.cos(yaw)*cp*camDist;
-  camera.position.lerp(new THREE.Vector3(cx,cyy,cz), Math.min(1,dt*8));
+  camera.position.set(cx,cyy,cz);
   camera.lookAt(P.pos.x, P.pos.y+1.7, P.pos.z);
 
   // shadow follow
@@ -860,9 +861,12 @@ const _m4=new THREE.Matrix4(), _q=new THREE.Quaternion(), _p=new THREE.Vector3()
 let built=false;
 function renderFx(dt){
   if(!built) return;
-  // enemies
+  // enemies — re-index each type contiguously so InstancedMesh actually draws them
+  const perType = {};
+  for(const t in enemyIM) perType[t]=0;
   for(let i=0;i<enemies.length;i++){
     const e=enemies[i];
+    if(!e.alive && !(e.deadT>0)) continue; // fully dead: skip (no instance slot)
     const im=enemyIM[e.type]; if(!im) continue;
     let sc=e.alive?e.scaleMul: (e.deadT>0 ? e.scaleMul*(e.deadT/0.28) : 0);
     let y=e.y;
@@ -874,11 +878,12 @@ function renderFx(dt){
     const face=e.alive?Math.atan2(P.pos.x-e.x,P.pos.z-e.z):0;
     _q.setFromEuler(new THREE.Euler(0,face,0));
     _s.setScalar(Math.max(0.0001,sc));
-    _m4.compose(_p,_q,_s); im.setMatrixAt(i,_m4);
-    if(e.flash>0){ e.flash-=dt; const f=Math.min(1,e.flash/0.12); im.setColorAt(i,_c.setRGB(1+f*1.5, 0.3+0.7*f, 0.3+0.7*f)); }
-    else im.setColorAt(i,_c.setRGB(1,1,1));
+    _m4.compose(_p,_q,_s); im.setMatrixAt(perType[e.type],_m4);
+    if(e.flash>0){ e.flash-=dt; const f=Math.min(1,e.flash/0.12); im.setColorAt(perType[e.type],_c.setRGB(1+f*1.5, 0.3+0.7*f, 0.3+0.7*f)); }
+    else im.setColorAt(perType[e.type],_c.setRGB(1,1,1));
+    perType[e.type]++;
   }
-  for(const t in enemyIM){ enemyIM[t].instanceMatrix.needsUpdate=true; if(enemyIM[t].instanceColor) enemyIM[t].instanceColor.needsUpdate=true; }
+  for(const t in enemyIM){ const im=enemyIM[t]; im.count=perType[t]; im.instanceMatrix.needsUpdate=true; if(im.instanceColor) im.instanceColor.needsUpdate=true; }
 
   // gems
   let gi=0;
