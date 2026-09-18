@@ -31,14 +31,14 @@ renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x0a0d16);
-scene.fog = new THREE.FogExp2(0x0a0d16, 0.014);
+scene.fog = new THREE.FogExp2(0x0a0d16, 0.010);
 
 const camera = new THREE.PerspectiveCamera(62, innerWidth/innerHeight, 0.1, 500);
 addEventListener('resize', ()=>{ camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth,innerHeight); });
 
-/* lights */
-scene.add(new THREE.AmbientLight(0x3a4668, 1.1));
-const moon = new THREE.DirectionalLight(0xbfd2ff, 1.5);
+/* lights — brighter fill so pale character models read against the night */
+scene.add(new THREE.AmbientLight(0x4a5878, 1.9));
+const moon = new THREE.DirectionalLight(0xcfe0ff, 2.4);
 moon.position.set(-30, 50, -20);
 moon.castShadow = true;
 moon.shadow.mapSize.set(2048,2048);
@@ -46,7 +46,7 @@ moon.shadow.camera.left=-35; moon.shadow.camera.right=35;
 moon.shadow.camera.top=35; moon.shadow.camera.bottom=-35;
 moon.shadow.camera.far=140;
 scene.add(moon); scene.add(moon.target);
-const hemi = new THREE.HemisphereLight(0x2a3560, 0x0c0f14, 0.7); scene.add(hemi);
+const hemi = new THREE.HemisphereLight(0x3a4a86, 0x141821, 1.1); scene.add(hemi);
 
 /* sky decor: moon disc + stars */
 {
@@ -172,7 +172,7 @@ const AudioSys = {
   async init(){
     if(this.ctx) return;
     this.ctx = new (window.AudioContext||window.webkitAudioContext)();
-    this.master = this.ctx.createGain(); this.master.gain.value=0.9; this.master.connect(this.ctx.destination);
+    this.master = this.ctx.createGain(); this.master.gain.value=(typeof Settings!=='undefined')?Settings.vol:0.9; this.master.connect(this.ctx.destination);
     const files = {shoot:'laserSmall_000',hit:'impactMetal_000',die:'explosionCrunch_000',gem:'slime_000',
                    levelup:'forceField_000',boss:'lowFrequency_explosion_000',hurt:'impactPunch_medium_000',
                    zap:'laserRetro_000',boom:'explosionCrunch_001',ui:'ui'};
@@ -243,15 +243,35 @@ document.addEventListener('pointerlockchange', ()=>{
 });
 document.addEventListener('mousemove', e=>{
   if(document.pointerLockElement===canvas && state==='playing'){
-    yaw   -= e.movementX*0.0022;
-    pitch += e.movementY*0.0018;
+    yaw   -= e.movementX*0.0022*Settings.sens;
+    pitch += e.movementY*0.0018*Settings.sens;
     pitch = Math.max(0.12, Math.min(1.25, pitch));
   }
 });
 
+/* ---------------- settings UI wiring (mouse sensitivity + volume) ---------------- */
+{
+  const sensS=$('sens-slider'), volS=$('vol-slider');
+  sensS.addEventListener('input', ()=>{ Settings.sens=parseFloat(sensS.value); $('sens-val').textContent=Settings.sens.toFixed(2)+'x'; });
+  volS.addEventListener('input', ()=>{ Settings.vol=parseInt(volS.value,10)/100; $('vol-val').textContent=Math.round(Settings.vol*100)+'%'; if(AudioSys.master) AudioSys.master.gain.value=Settings.vol; });
+  $('sens-reset').addEventListener('click', ()=>{ sensS.value=1; sensS.dispatchEvent(new Event('input')); });
+  $('vol-reset').addEventListener('click', ()=>{ volS.value=90; volS.dispatchEvent(new Event('input')); });
+  $('settings-close').addEventListener('click', closeSettings);
+  // stop clicks inside the settings panel from falling through to the pause "resume" handler
+  $('settings').addEventListener('click', e=>e.stopPropagation());
+}
+
 /* ---------------- game state ---------------- */
 let state='menu';           // menu | playing | levelup | pause | over
 let luOpen=false;
+/* ---------------- settings (mouse sensitivity + volume) ---------------- */
+const Settings = { sens:1, vol:0.9 };
+try{ const s=JSON.parse(localStorage.getItem('ds3_settings')||'{}'); if(typeof s.sens==='number') Settings.sens=s.sens; if(typeof s.vol==='number') Settings.vol=s.vol; }catch(e){}
+let settingsOpen=false;
+function openSettings(){ settingsOpen=true; $('settings').classList.remove('hidden'); $('sens-slider').value=Settings.sens; $('vol-slider').value=Math.round(Settings.vol*100); $('sens-val').textContent=Settings.sens.toFixed(2)+'x'; $('vol-val').textContent=Math.round(Settings.vol*100)+'%'; }
+function closeSettings(){ settingsOpen=false; $('settings').classList.add('hidden'); try{localStorage.setItem('ds3_settings',JSON.stringify({sens:Settings.sens,vol:Settings.vol}));}catch(e){}
+  // if we opened settings from pause, resume play and re-lock the pointer
+  if(state==='pause'){ state='playing'; pauseEl.classList.add('hidden'); try{canvas.requestPointerLock().catch(()=>{})}catch(e){} } }
 window._dbg = ()=>({state, luOpen, pendingLus, hp:P.hp, maxHp:P.maxHp, lvl:P.level, xp:P.xp,
   gameTime, kills, enemiesAlive:enemies.filter(e=>e.alive).length,
   pauseVisible:!pauseEl.classList.contains('hidden'), luVisible:!luEl.classList.contains('hidden')});
@@ -260,16 +280,21 @@ const P = { pos:new THREE.Vector3(0,0,0), velY:0, onGround:true, hp:100, maxHp:1
             level:1, xp:0, inv:0, yaw:0, speedBase:7 };
 
 /* ---------------- player model ---------------- */
-let playerG=null;
+let playerG=null, playerBlob=null, playerRing=null;
 function buildPlayer(){
   if(playerG){ scene.remove(playerG); playerG=null; }
   const g = M.player ? M.player.clone(true) : fallbackMesh('player');
   g.scale.setScalar(1.25);
-  g.traverse(o=>{ if(o.isMesh){ o.castShadow=true; } });
+  // make the hero clearly readable: warm gold emissive tint + keep shadows
+  g.traverse(o=>{ if(o.isMesh){ o.castShadow=true;
+    const m=o.material; if(m && m.emissive!==undefined){ m.emissive=new THREE.Color(0xffc24d); m.emissiveIntensity=0.55; } }});
   scene.add(g); playerG=g;
-  // shadow blob
-  const blob=new THREE.Mesh(new THREE.CircleGeometry(0.7,20), new THREE.MeshBasicMaterial({color:0x000000,transparent:true,opacity:0.35}));
-  blob.rotation.x=-Math.PI/2; blob.position.y=0.02; g.add(blob);
+  // ground shadow blob — child of g so x/z follows, but we pin y to the floor each frame (it must NOT jump)
+  const blob=new THREE.Mesh(new THREE.CircleGeometry(0.7,24), new THREE.MeshBasicMaterial({color:0x000000,transparent:true,opacity:0.38}));
+  blob.rotation.x=-Math.PI/2; blob.position.y=0.02; g.add(blob); playerBlob=blob;
+  // "you are here" glow ring (cyan) so the player is unmistakable against enemies
+  const ring=new THREE.Mesh(new THREE.RingGeometry(0.75,1.05,32), new THREE.MeshBasicMaterial({color:0x4cc9f0,transparent:true,opacity:0.85,side:THREE.DoubleSide}));
+  ring.rotation.x=-Math.PI/2; ring.position.y=0.03; g.add(ring); playerRing=ring;
 }
 
 /* ---------------- weapons ---------------- */
@@ -369,12 +394,17 @@ const EDEF = {
 const MAXE = 340;
 let enemies=[]; // per-instance state
 let enemyIM={};
+// per-type emissive tint so enemies read clearly in the night (hostile = saturated colors)
+const ETINT = { zombie:0x7dff5e, skeleton:0xcfe0ff, ghost:0x6df2ff, vampire:0xff4d6d };
 function buildEnemies(){
   for(const t in EDEF){
     const model = M[t] ? M[t].clone(true) : fallbackMesh(t);
     model.traverse(o=>{ if(o.isMesh) o.castShadow=true; });
     const f=flattenModel(model);
-    const im=new THREE.InstancedMesh(f.geo, Array.isArray(f.mats)?f.mats:f.mats.clone(), MAXE);
+    const srcMats = Array.isArray(f.mats)?f.mats:[f.mats];
+    // clone + tint: distinct glowing color per enemy type (clone so we don't leak into the shared cache)
+    const mats = srcMats.map(m=>{ const c=m.clone(); if(c.emissive!==undefined){ c.emissive=new THREE.Color(ETINT[t]); c.emissiveIntensity=0.6; } return c; });
+    const im=new THREE.InstancedMesh(f.geo, Array.isArray(srcMats)?mats:mats[0], MAXE);
     im.count=0; im.castShadow=true; im.frustumCulled=false;
     im.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(MAXE*3).fill(1),3);
     scene.add(im); enemyIM[t]=im;
@@ -654,12 +684,26 @@ function update(dt){
     // walk anim: swing child parts
     const t=gameTime*11, amp=il>0?0.55:0;
     for(const ch of playerG.children){
-      if(ch===playerG.userData.blob) continue;
+      if(ch===playerBlob||ch===playerRing) continue;
       const nm=(ch.name||'').toLowerCase();
       if(nm.includes('left')&&nm.includes('leg')) ch.rotation.x=Math.sin(t)*amp;
       else if(nm.includes('right')&&nm.includes('leg')) ch.rotation.x=-Math.sin(t)*amp;
       else if(nm.includes('left')&&nm.includes('arm')) ch.rotation.x=-Math.sin(t)*amp*0.8;
       else if(nm.includes('right')&&nm.includes('arm')) ch.rotation.x=Math.sin(t)*amp*0.8;
+    }
+    // #3 shadow: stays on the floor (never jumps) and shrinks + fades as the player rises
+    // blob/ring are children of g whose y = jump height, so offset local y by -P.pos.y to pin them to the floor
+    if(playerBlob){
+      const h=P.pos.y, k=Math.max(0.32, 1 - h*0.16);
+      playerBlob.position.set(0, -h + 0.02, 0);
+      playerBlob.scale.setScalar(k);
+      playerBlob.material.opacity = 0.38*Math.max(0.35, k);
+    }
+    if(playerRing){
+      const h=P.pos.y;
+      playerRing.position.set(0, -h + 0.03, 0);
+      playerRing.scale.setScalar(Math.max(0.4, 1 - h*0.12));
+      playerRing.material.opacity = 0.85*Math.max(0.3, 1 - h*0.14);
     }
   }
 
@@ -966,6 +1010,9 @@ function restart(){
 /* ---------------- boot ---------------- */
 $('startbtn').onclick=()=>startGame();
 $('restartbtn').onclick=()=>restart();
+// settings buttons (menu + pause) — same panel, reachable from both
+$('settings-btn-menu').addEventListener('click', e=>{ e.stopPropagation(); openSettings(); });
+$('settings-btn-pause').addEventListener('click', e=>{ e.stopPropagation(); openSettings(); });
 (async function boot(){
   await prepModels();
   buildEnv();
@@ -973,4 +1020,5 @@ $('restartbtn').onclick=()=>restart();
   buildGems();
   buildWeaponFx();
   built=true;
+  window._diag = ()=>({playerG, enemyIM, M_keys:Object.keys(M), scene});
 })();
